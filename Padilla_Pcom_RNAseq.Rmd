@@ -1,0 +1,1564 @@
+---
+title: "Padilla_Pcom_RNAseq"
+author: "MVI"
+date: "2026-01-21"
+output: html_document
+---
+
+```{r}
+setwd("~/Desktop/Padilla_Gamino/PoritesCompressa_PadillaGamino")
+```
+
+```{r}
+#to install arrayQualityMetrics, using Rswitch to go into R 4.2 bc it seems to not work on 4.5.2
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("arrayQualityMetrics")
+#BiocManager::install("DESeq2")
+#BiocManager::install("WGCNA")
+#BiocManager::install("flashClust")
+#install.packages("RColorBrewer")
+#install.packages("gplots")
+#install.packages("pheatmap")
+#install.packages("vegan")
+#install.packages("ggplot2")
+#install.packages("ggrepel")
+#install.packages("VennDiagram")
+#install.packages("ggtext")
+#install.packages("reshape2")
+#install.packages("tidyselect")
+#install.packages("plotly")
+#install.packages("Hmisc")
+
+```
+
+
+```{r}
+library("DESeq2")                   
+#library("arrayQualityMetrics")      
+library("dplyr")                  
+library("RColorBrewer")             
+library("gplots")                   
+library("tidyverse")               
+library("pheatmap")                
+library("vegan")                    
+library("ggplot2")                 
+library("ggrepel") 
+library("WGCNA")
+library("flashClust")
+library("VennDiagram")
+#library("KOGMWU")
+library("ggtext")
+#library("ggpubr")
+library("reshape2")
+library("tidyselect")
+library("devtools")
+#library("cmprsk")
+#library("car")
+library("Hmisc")
+library("plotly")
+```
+
+read in annotations file
+```{r}
+anno <- read.delim("./Porites_compressa_emapper.emapper.annotations.txt", sep="\t", header = TRUE)
+
+#gene = anno %>%
+#  mutate(gene_ID = ifelse(Preferred_name == '-', query, Preferred_name))
+#View(gene)
+#head(gene)
+#gene2query <- gene[,c(1,22)]
+#View(gene2query)
+
+gene = anno %>%
+mutate(gene_ID = ifelse(Preferred_name == '-' | is.na(Preferred_name), query, Preferred_name))%>%
+  mutate(gene_ID = make.names(gene_ID, unique = TRUE))
+gene2query <- gene[,c(1,22)]
+```
+
+
+
+```{r}
+countData <- read.table("./Padilla_Pcom_counts.txt")
+length(countData[,1])
+#40465
+head(countData)
+newColNames = c("NB_F1_K5", "B_F1_K5", "NB_F2_44", "B_F2_44", "B_F3_44", "NB_F3_K5", "B_M1_K5", "B_M2_K5", "B_F4_K5", "B_F5_K5", "NB_F4_44", "NB_F5_44", "NB_F6_K5", "B_M3_K5", "B_F6_44")
+colnames(countData)=paste(newColNames)
+length(countData[,1])
+#40465
+head(countData)
+
+totalCounts=colSums(countData)
+barplot(totalCounts, ylab="Raw Counts", xlab="P.compressa samples")
+#save as rawcounts_012126 as 6.5x4 landscape
+
+min(totalCounts)
+#2837556
+max(totalCounts)
+#8944911
+```
+
+```{r}
+totalQs <- as.data.frame(row.names(countData))
+colnames(totalQs)=paste("query")
+
+gene = anno %>%
+  right_join(totalQs) %>%
+mutate(gene_ID = ifelse(Preferred_name == '-' | is.na(Preferred_name), query, Preferred_name))%>%
+  mutate(gene_ID = make.names(gene_ID, unique = TRUE))
+gene2query <- gene[,c(1,22)]
+```
+
+
+Open, inspect, and get count data for symbiont counts
+```{r}
+countData_s <- read.table("./Padilla_PcomSym_counts.txt")
+head(countData_s)
+length(countData_s[,1])
+#20047
+newColNames_s = c("NB_F1_K5", "B_F1_K5", "NB_F2_44", "B_F2_44", "B_F3_44", "NB_F3_K5", "B_M1_K5", "B_M2_K5", "B_F4_K5", "B_F5_K5", "NB_F4_44", "NB_F5_44", "NB_F6_K5", "B_M3_K5", "B_F6_44")
+colnames(countData_s)=paste(newColNames_s)
+length(countData_s[,1])
+#20047
+head(countData_s)
+
+totalCounts_s=colSums(countData_s)
+barplot(totalCounts_s, ylab="Raw Counts", xlab="P. compressa symbiont")
+#save as rawcounts_symbionts_012126 as 11x4 landscape in Figure directory
+
+min(totalCounts_s)
+#32438
+max(totalCounts_s)
+#362232
+```
+
+Now return to the whole data set of the host analysis
+Make treatment groups for a metadata file
+```{r}
+corals=c("NB_F1_K5", "B_F1_K5", "NB_F2_44", "B_F2_44", "B_F3_44", "NB_F3_K5", "B_M1_K5", "B_M2_K5", "B_F4_K5", "B_F5_K5", "NB_F4_44", "NB_F5_44", "NB_F6_K5", "B_M3_K5", "B_F6_44")
+c=data.frame(corals)
+coraldata <-c
+coraldata
+
+treat=c("NB_F_K5", "B_F_K5", "NB_F_44", "B_F_44", "B_F_44", "NB_F_K5", "B_M_K5", "B_M_K5", "B_F_K5", "B_F_K5", "NB_F_44", "NB_F_44", "NB_F_K5", "B_M_K5", "B_F_44")
+g=data.frame(treat)
+colData<- g
+colData
+
+reef=c("K5", "K5", "44", "44", "44", "K5", "K5", "K5", "K5", "K5", "44", "44", "K5", "K5", "44")
+r=data.frame(reef)
+reefData<- r
+reefData
+
+bleach = c("NB", "B", "NB", "B", "B", "NB", "B", "B", "B", "B", "NB", "NB", "NB", "B", "B")
+h=data.frame(bleach)
+bleachData<- h
+bleachData
+
+sex=c("F", "F", "F", "F", "F", "F", "M", "M", "F", "F", "F", "F", "F", "M", "F")
+s=data.frame(sex)
+sexData<- s
+sexData
+
+allData = cbind(coraldata, colData, reefData, bleachData, sexData)
+allData
+```
+
+Run preliminary DESeq and outlier analysis
+```{r}
+dds<-DESeqDataSetFromMatrix(countData=countData, colData=colData, design=~treat)
+dds<-DESeq(dds)
+
+vsd.ge=assay(vst(dds))
+rl=vst(dds)
+e=ExpressionSet(assay(rl), AnnotatedDataFrame(as.data.frame(colData(rl))))
+v = setwd("~/Desktop/Padilla_Gamino")
+arrayQualityMetrics(e,outdir=v,intgroup=c("treat"),force=T)
+```
+No outliers!
+
+so switch back to R 4.5 for remaining script
+
+rerun deseq
+```{r}
+dds<-DESeqDataSetFromMatrix(countData=countData, colData=colData, design=~treat)
+dds<-DESeq(dds)
+```
+
+
+- Now we are going to retrieve the rlog data, which will give us better transformation when size factors vary across samples
+- regularized log transformation, transforms COUNT DATA to log2 scale to minimize differences between samples for rows with small counts
+```{r}
+rlog=rlogTransformation(dds, blind=TRUE) 
+rld=assay(rlog)
+head(rld)
+hist(rld)
+#not really normally distributed, kinda skewed to having lots of low count data
+#saved as histogram_pcom_012126 5x5
+```
+- The assay function allows you to access the matrix-like data, so that you can view it bc head(rld) gives you just a summary
+- The histogram above displays the frequency of each binned rld count value
+
+Raw Sample Comparison
+
+- Making a sample distance heatmap
+- as.matrix attempts to turn its argument into a matrix
+- dist computes and returns the distance matrix computed using the specified distance measure to compute distances between the rows of a data matrix rld
+- Create a sample heatmap of the relatedness based on the count distance/difference between samples
+```{r}
+sampleDists <- as.matrix(dist(t(rld)))
+
+heatmap.2(as.matrix(sampleDists), key=F, trace="none",
+          col=colorpanel(100, "black", "white"),
+          margin=c(10, 10))
+
+#saved as sampledisthm_pcom as landscape with 6x6 dimensions
+```
+
+jump to PCA
+```{r}
+head(rld)
+length(rld[,1])
+#40465
+```
+
+```{r}
+rld_t=t(rld)
+#colnames(rld_t)
+pca <- prcomp(rld_t,center = TRUE)
+li <- pca$sdev^2 / sum(pca$sdev^2)
+pc1v <- round(li[1] * 100, 1)
+pc2v <- round(li[2] * 100, 1)
+pca_s <- as.data.frame(pca$x)
+pca_s <- pca_s[,c(1,2)]
+
+pca_s$Samples = row.names(pca_s)
+pca_s$treat=allData$treat
+
+pca_s$reef=allData$reef
+pca_s$bleach=allData$bleach
+pca_s$sex=allData$sex
+
+head(pca_s)
+```
+
+```{r}
+reef_col <- c("red3", "blue")
+sex_shape = c(25, 24)
+bleach_fill <- c("white", "white", "white", "red3", "blue")
+bleach_fill_new <- c("white", "red3")
+
+pca_plot <- ggplot(pca_s, aes(x=PC1, y=PC2, color = reef, pch = sex, fill = treat, group=treat)) +
+  geom_point(size=3, alpha=0.75) +
+  #  geom_text_repel(aes(label=Samples)) +
+  scale_colour_manual(values=reef_col)+
+  scale_fill_manual(values=bleach_fill, guide=guide_legend(override.aes = list(color=list("white","white","white","black","black"))))+
+ scale_shape_manual(values=sex_shape) +
+  #stat_ellipse()+
+  #labs(color="reef", pch="sex", fill="bleach")+
+  xlab(paste0("PC1: ",pc1v,"% variance")) +
+  ylab(paste0("PC2: ",pc2v,"% variance")) +
+  theme(panel.background = element_rect(color="black", fill="white"),
+        axis.text = element_text(colour="black", size=10), 
+        axis.title.x = ggtext::element_markdown(face="bold", size=12),
+        axis.title.y = ggtext::element_markdown(face="bold",size=12),
+        panel.grid.major = element_line(colour = "gray80", linewidth = 0.5, linetype="dotted"),
+        legend.position="right",
+        legend.background=element_rect(color="black"),
+        legend.text=element_text(face="bold", color="black", size=8),
+        legend.title= element_blank(),
+        legend.text.align = 0,
+        legend.key.size=unit(10,"point"))
+ggplotly(pca_plot)
+#padilla_PCA_all 6x4
+```
+
+
+```{r}
+#####separate by sex to do only female
+rld_fem <- rld[,c(1:6,9:13,15)]
+
+rld_fem_t=t(rld_fem)
+#colnames(rld_t)
+pca_fem <- prcomp(rld_fem_t,center = TRUE)
+li_fem <- pca_fem$sdev^2 / sum(pca_fem$sdev^2)
+pc1v_fem <- round(li_fem[1] * 100, 1)
+pc2v_fem <- round(li_fem[2] * 100, 1)
+pca_s_fem <- as.data.frame(pca_fem$x)
+pca_s_fem <- pca_s_fem[,c(1,2)]
+
+head(allData)
+allData_fem <- subset(allData, sex=="F")
+
+pca_s_fem$Samples = row.names(pca_s_fem)
+pca_s_fem$treat=allData_fem$treat
+
+pca_s_fem$reef=allData_fem$reef
+pca_s_fem$bleach=allData_fem$bleach
+#pca_s$sex=allData$sex
+
+head(pca_s_fem)
+
+reef_col <- c("red3", "blue")
+#sex_shape = c(21, 24)
+bleach_fill_fem <- c("white", "white", "red3", "blue")
+
+pca_plot_fem <- ggplot(pca_s_fem, aes(x=PC1, y=PC2, color = reef, fill = treat, group=treat)) +
+  geom_point(size=3, alpha=0.75, shape=21) +
+  #  geom_text_repel(aes(label=Samples)) +
+  scale_colour_manual(values=reef_col)+
+  scale_fill_manual(values=bleach_fill_fem, guide=guide_legend(override.aes = list(color=list("white","white", "black","black"))))+
+ #scale_shape_manual(values=reef_shape) +
+  #stat_ellipse()+
+  #labs(color="reef", pch="sex", fill="bleach")+
+  xlab(paste0("PC1: ",pc1v_fem,"% variance")) +
+  ylab(paste0("PC2: ",pc2v_fem,"% variance")) +
+  theme(panel.background = element_rect(color="black", fill="white"),
+        axis.text = element_text(colour="black", size=10), 
+        axis.title.x = ggtext::element_markdown(face="bold", size=12),
+        axis.title.y = ggtext::element_markdown(face="bold",size=12),
+        panel.grid.major = element_line(colour = "gray80", linewidth = 0.5, linetype="dotted"),
+        legend.position="right",
+        legend.background=element_rect(color="black"),
+        legend.text=element_text(face="bold", color="black", size=8),
+        legend.title= element_blank(),
+        legend.text.align = 0,
+        legend.key.size=unit(10,"point"))
+ggplotly(pca_plot_fem)
+#padilla_PCA_fem 6x4
+```
+
+```{r}
+install_github("pmartinezarbizu/pairwiseAdonis/pairwiseAdonis")
+library(pairwiseAdonis)
+
+# Effect of reef
+adonis2(pca$x ~ reef, data = pca_s, method='eu', na.rm = TRUE)
+# Pr(>F) = 0.28
+
+# Effect of bleach status
+adonis2(pca$x ~ bleach, data = pca_s, method='eu', na.rm = TRUE)
+# Pr(>F)=0.69
+
+# Effect of sex
+adonis2(pca$x ~ sex, data = pca_s, method='eu', na.rm = TRUE)
+# Pr(>F)=0.18
+
+# Effect of treat
+adonis2(pca$x ~ treat, data = pca_s, method='eu', na.rm = TRUE)
+# Pr(>F)=0.197
+
+# Interaction between reef and sex
+adonis2(pca$x ~ reef*sex, data = pca_s, method='eu', na.rm = TRUE)
+#Pr(>F>=0.092 .)
+
+# Interaction between reef and bleach
+adonis2(pca$x ~ reef*bleach, data = pca_s, method='eu', na.rm = TRUE)
+#Pr(>F>=0.49)
+
+# Interaction between sex and bleach
+adonis2(pca$x ~ sex*bleach, data = pca_s, method='eu', na.rm = TRUE)
+#Pr(>F>=0.459)
+
+# Interaction between reef, sex and bleach
+adonis2(pca$x ~ reef*sex*bleach, data = pca_s, method='eu', na.rm = TRUE)
+#Pr(>F>=0.182)
+
+# Pairwise effect of treatment (to get individual pairwise comparisons)
+pairwise.adonis2(pca$x ~ treat, data = pca_s, method='eu', na.rm = TRUE)
+#none are significant
+
+```
+
+```{r}
+# Effect of reef
+adonis2(pca_fem$x ~ reef, data = pca_s_fem, method='eu', na.rm = TRUE)
+# Pr(>F) = 0.077 .
+
+# Effect of bleach status
+adonis2(pca_fem$x ~ bleach, data = pca_s_fem, method='eu', na.rm = TRUE)
+# Pr(>F)=0.684
+
+# Effect of treat
+adonis2(pca_fem$x ~ treat, data = pca_s_fem, method='eu', na.rm = TRUE)
+# Pr(>F)=0.14
+
+# Interaction between reef and bleach
+adonis2(pca_fem$x ~ reef*bleach, data = pca_s_fem, method='eu', na.rm = TRUE)
+#Pr(>F>=0.134)
+
+# Pairwise effect of treatment (to get individual pairwise comparisons)
+pairwise.adonis2(pca_fem$x ~ treat, data = pca_s_fem, method='eu', na.rm = TRUE)
+#none are significant
+```
+
+
+i think i'm going to have to separate the data by sex for the plasticity. Can really only compare the females because there are so few males and they're all bleached and all from one reef
+```{r}
+source("https://raw.githubusercontent.com/seabove7/RandomFun/main/Plasticity_function/PCAplast_function.R")
+
+rld_plast <- rld_fem
+head(rld_plast)
+rld_plast_t <- t(rld_plast)
+pca_df_plast <- prcomp(rld_plast_t, center=TRUE)
+
+allData_fem2 <- remove_rownames(allData_fem)
+allData_fem2 <- column_to_rownames(allData_fem2, var="corals")
+head(allData_fem2)
+
+write.csv(allData_fem2, file="allData_fem2.csv", quote=F, row.names=TRUE)
+allData_fem2 <- read.csv("allData_fem2.csv")
+head(allData_fem2)
+allData_fem2 <- as.data.frame(allData_fem2)
+
+head(pca_df_plast)
+
+plast_out_all <- PCAplast(pca = pca_df_plast, # the PCA dataframe containing the PCA eigenvalues
+         data = allData_fem2, # the condition/treatment data corresponding to samples
+         #sample_ID = "X", # the name of column that provide unique ID per sample (if blank, will pull rownames for this)
+        num_pca =  2, # the number of PCAs to include in analysis (default is 'all', but you can specify another number with a minimum of 2 PCAs)
+         control_lvl = "NB", # control level of the treatment. If blank, a control mean per control level is assumed
+         group = "reef", # the grouping column (i.e., colony). If blank, will assume control level grouping only! was "symstat" in first submission; changed to Clone here
+         control_col = "bleach") # what the 'treatment' column is called
+
+plast_out_all
+```
+
+```{r}
+plast_col = c("red3", "blue")
+#"gray40","gray40","gray40","gray40","#CC6600","#CC6600","#CC6600","#CC6600","#CC6600","gray40", "gray40", "gray40", "gray40", "gray40", "#CC6600", "#CC6600", "#CC6600", "#CC6600", "#CC6600", "#CC6600", "gray40", "gray40", "gray40", "gray40", "gray40", "#CC6600", "#CC6600", "#CC6600", "#CC6600", "#CC6600"
+
+#plast_reorder <- plast_out_all[c(1:4, 10:14, 21:25, 5:9, 15:20, 26:30),]
+#plast_reorder$treat  = factor(plast_reorder$treat, levels=plast_reorder$treat)
+
+plast_plot <- ggplot(data = plast_out_all, aes(x = reef, y = dist, group=treat)) + 
+  geom_point(color=c("blue", "red3", "red3", "blue", "blue", "red3"), stroke=1, position = position_jitter(width = 0.2),aes(fill=reef)) +
+ stat_summary(fun.data = "mean_sdl", fun.args = list(mult = 1), geom = "errorbar", width = 0, colour = c("black")) +
+  stat_summary(fun = "mean", size = 0.8, shape=21, colour = "black", fill="gray") +
+  scale_fill_manual(values=plast_col, guide=guide_legend(override.aes = list(color=list("red3", "blue"))))+
+  #scale_x_discrete(limits = c("P0A","P2A", "RA", "P0S", "P2S", "RS"))+
+  #scale_shape_manual(values=c(16, 17, 18)) +
+  #ylim(0,30)+
+  ylab("Plasticity")+
+  xlab("Reef")+
+  #labs(fill="Symbiosis State")+
+  theme(panel.background = element_rect(color="black", fill="white"),
+        axis.text = element_text(colour="black", size=10), 
+        axis.title.x = ggtext::element_markdown(face="bold", size=12),
+        axis.title.y = ggtext::element_markdown(face="bold",size=12),
+        panel.grid.major = element_line(colour = "gray80", linewidth = 0.5, linetype="dotted"),
+        legend.position="right",
+        legend.background=element_rect(color="black"),
+        legend.text=element_text(face="bold", color="black", size=8),
+        legend.title= element_blank(),
+        legend.text.align = 0,
+        legend.key.size=unit(10,"point"))
+plast_plot
+#saved as plasticity_fem_020226 as portrait with 4x3
+
+summary(plast_out_all)
+plast_aov <- aov(dist~reef, data=plast_out_all)
+summary(plast_aov)
+
+#             Df Sum Sq Mean Sq F value Pr(>F)
+#reef         1  941.3   941.3   1.718   0.26
+#Residuals    4 2191.1   547.8     
+
+
+```
+
+Make comparison variables and visualize the results
+
+```{r}
+#Look at results in dds for female K5 B vs NB
+head(dds)
+resK5_BF_NBF<- results(dds, contrast = c("treat", "B_F_K5", "NB_F_K5"))
+resK5_BF_NBF
+head(resK5_BF_NBF)
+table(resK5_BF_NBF$padj<0.1)
+# FALSE=25002 TRUE=229
+summary(resK5_BF_NBF, alpha=0.05)
+# out of 40465 with nonzero total read count
+#adjusted p-value < 0.05
+#LFC > 0 (up)       : 34, 0.084%
+#LFC < 0 (down)     : 101, 0.25%
+#outliers [1]       : 351, 0.87%
+#low counts [2]     : 14883, 37%
+
+#Look at results in dds for female 44 B vs NB
+res44_BF_NBF<- results(dds, contrast = c("treat", "B_F_44", "NB_F_44"))
+res44_BF_NBF
+head(res44_BF_NBF)
+table(res44_BF_NBF$padj<0.1)
+# FALSE=23648 TRUE=48
+summary(res44_BF_NBF, alpha=0.05)
+#out of 40465 with nonzero total read count
+#adjusted p-value < 0.05
+#LFC > 0 (up)       : 8, 0.02%
+#LFC < 0 (down)     : 15, 0.037%
+#outliers [1]       : 351, 0.87%
+#low counts [2]     : 16418, 41%
+
+##a lot of low counts
+
+#Look at results in dds for K5 female bleached versus male bleached
+resK5_BM_BF<- results(dds, contrast = c("treat", "B_M_K5", "B_F_K5"))
+resK5_BM_BF
+head(resK5_BM_BF)
+table(resK5_BM_BF$padj<0.1)
+# FALSE=23279 TRUE=417
+summary(resK5_BM_BF, alpha=0.05)
+#out of 40465 with nonzero total read count
+#adjusted p-value < 0.05
+#LFC > 0 (up)       : 123, 0.3%
+#LFC < 0 (down)     : 59, 0.15%
+#outliers [1]       : 351, 0.87%
+#low counts [2]     : 16418, 41%
+```
+
+Dispersion plot
+```{r}
+plotDispEsts(dds, main="Dispersion P. com")
+```
+
+to do other, bigger grouped comparisons (like all bleached versus all non-bleached / all females versus all males / all K5 vs 44) i'll need to re-dds based on a different column (sex or bleach or reef)
+
+sex
+```{r}
+dds_s<-DESeqDataSetFromMatrix(countData=countData, colData=sexData, design=~sex)
+dds_s<-DESeq(dds_s)
+
+rlog_s=rlogTransformation(dds_s, blind=TRUE) 
+rld_s=assay(rlog_s)
+head(rld_s)
+hist(rld_s)
+
+#Look at results in dds_s for all male to female
+head(dds_s)
+res_M_F<- results(dds_s, contrast = c("sex", "M", "F"))
+res_M_F
+head(res_M_F)
+table(res_M_F$padj<0.1)
+# 26627    69 
+summary(res_M_F, alpha=0.05)
+# out of 40449 with nonzero total read count
+#adjusted p-value < 0.05
+#LFC > 0 (up)       : 23, 0.057%
+#LFC < 0 (down)     : 19, 0.047%
+#outliers [1]       : 450, 1.1%
+#low counts [2]     : 13319, 33%
+```
+
+reef
+```{r}
+dds_r<-DESeqDataSetFromMatrix(countData=countData, colData=reefData, design=~reef)
+dds_r<-DESeq(dds_r)
+
+rlog_r=rlogTransformation(dds_r, blind=TRUE) 
+rld_r=assay(rlog_r)
+head(rld_r)
+hist(rld_r)
+
+#Look at results in dds_s for all KF to 44
+head(dds_r)
+res_K5_44<- results(dds_r, contrast = c("reef", "K5", "44"))
+res_K5_44
+head(res_K5_44)
+table(res_K5_44$padj<0.1)
+# 26715    70 
+summary(res_K5_44, alpha=0.05)
+# out of 40449 with nonzero total read count
+#adjusted p-value < 0.05
+#LFC > 0 (up)       : 23, 0.057%
+#LFC < 0 (down)     : 23, 0.057%
+#outliers [1]       : 417, 1%
+#low counts [2]     : 13263, 33%
+```
+
+bleach
+```{r}
+dds_b<-DESeqDataSetFromMatrix(countData=countData, colData=bleachData, design=~bleach)
+dds_b<-DESeq(dds_b)
+
+rlog_b=rlogTransformation(dds_b, blind=TRUE) 
+rld_b=assay(rlog_b)
+head(rld_b)
+hist(rld_b)
+
+#Look at results in dds_s for all bleach to nonbleach
+head(dds_b)
+res_B_NB<- results(dds_b, contrast = c("bleach", "B", "NB"))
+res_B_NB
+head(res_B_NB)
+table(res_B_NB$padj<0.1)
+# 28324    58 
+summary(res_B_NB, alpha=0.05)
+# out of 40449 with nonzero total read count
+#adjusted p-value < 0.05
+#LFC > 0 (up)       : 3, 0.0074%
+#LFC < 0 (down)     : 28, 0.069%
+#outliers [1]       : 343, 0.85%
+#low counts [2]     : 11740, 29%
+```
+
+those comparisons aren't very informative, so i'll just leave them for now and come back if i want to, but for now, going to continue with the original dds
+
+create GO input files for
+resK5_BF_NBF
+res44_BF_NBF
+resK5_BM_BF
+```{r}
+#resK5_BF_NBF
+write.table(resK5_BF_NBF, file="./K5_BF_NBF_DE_26.txt", quote=F, sep="\t")
+head(read.delim("./K5_BF_NBF_DE_26.txt"))
+res_K5BFNBF<- read.delim("./K5_BF_NBF_DE_26.txt")
+res_K5BFNBF = res_K5BFNBF %>%
+  tibble::rownames_to_column(var = "query")
+head(res_K5BFNBF)
+nrow(res_K5BFNBF)
+#40465
+
+go_input_K5BFNBF = res_K5BFNBF %>%
+  mutate(mutated_p = -log(pvalue)) %>%
+  mutate(mutated_p_updown = ifelse(log2FoldChange < 0, mutated_p*-1, mutated_p*1)) %>%
+  na.omit() %>%
+  select(query, mutated_p_updown)
+nrow(go_input_K5BFNBF)
+#25231
+head(go_input_K5BFNBF)
+colnames(go_input_K5BFNBF) <- c("gene", "pval")
+head(go_input_K5BFNBF)
+write.csv(go_input_K5BFNBF, file="./K5BFNBF_GO.csv", quote=F, row.names=FALSE)
+
+#res44_BF_NBF
+write.table(res44_BF_NBF, file="./44_BF_NBF_DE_26.txt", quote=F, sep="\t")
+head(read.delim("./44_BF_NBF_DE_26.txt"))
+res_44BFNBF<- read.delim("./44_BF_NBF_DE_26.txt")
+res_44BFNBF = res_44BFNBF %>%
+  tibble::rownames_to_column(var = "query")
+head(res_44BFNBF)
+nrow(res_44BFNBF)
+#40465
+res_44BFNBF_05 <- as.data.frame(res_44BFNBF[which(res_44BFNBF$padj < 0.05), ])
+
+go_input_44BFNBF = res_44BFNBF %>%
+  mutate(mutated_p = -log(pvalue)) %>%
+  mutate(mutated_p_updown = ifelse(log2FoldChange < 0, mutated_p*-1, mutated_p*1)) %>%
+  na.omit() %>%
+  select(query, mutated_p_updown)
+nrow(go_input_44BFNBF)
+#23696
+head(go_input_44BFNBF)
+colnames(go_input_44BFNBF) <- c("gene", "pval")
+head(go_input_44BFNBF)
+write.csv(go_input_44BFNBF, file="./44BFNBF_GO.csv", quote=F, row.names=FALSE)
+
+#resK5_BM_BF
+write.table(resK5_BM_BF, file="./K5_BM_BF_DE_26.txt", quote=F, sep="\t")
+head(read.delim("./K5_BM_BF_DE_26.txt"))
+res_K5BMBF<- read.delim("./K5_BM_BF_DE_26.txt")
+res_K5BMBF = res_K5BMBF %>%
+  tibble::rownames_to_column(var = "query")
+head(res_K5BMBF)
+nrow(res_K5BMBF)
+#40465
+res_K5BMBF_05 <- as.data.frame(res_K5BMBF[which(res_K5BMBF$padj < 0.05), ])
+
+go_input_K5BMBF = res_K5BMBF %>%
+  mutate(mutated_p = -log(pvalue)) %>%
+  mutate(mutated_p_updown = ifelse(log2FoldChange < 0, mutated_p*-1, mutated_p*1)) %>%
+  na.omit() %>%
+  select(query, mutated_p_updown)
+nrow(go_input_K5BMBF)
+#23696
+head(go_input_K5BMBF)
+colnames(go_input_K5BMBF) <- c("gene", "pval")
+head(go_input_K5BMBF)
+write.csv(go_input_K5BMBF, file="./K5BMBF_GO.csv", quote=F, row.names=FALSE)
+```
+
+run GO
+```{r}
+#K5_BF_NBF
+input="K5BFNBF_GO.csv"
+goAnnotations="Porites_compressa_iso2go.tab"
+goDatabase="go.obo"
+goDivision="BP"
+source("gomwu.functions.R")
+
+gomwuStats(input, goDatabase, goAnnotations, goDivision,
+           perlPath="perl",
+           largest=0.1,
+           smallest=5,
+           clusterCutHeight=0.25)
+#261
+resultsBP=gomwuPlot(input,goAnnotations,goDivision,
+                    absValue=1,
+                    level1=0.1,
+                    level2=0.05,
+                    level3=0.01,
+                    txtsize=1.5,
+                    treeHeight=0.5,
+)
+#saved as BP_apoP0C_051425 as portrait with 45x10 dimensions in Figures
+
+
+```
+
+Come back to the other less informative comparisons
+```{r}
+#B_NB
+write.table(res_B_NB, file="./B_NB_DE_26.txt", quote=F, sep="\t")
+head(read.delim("./B_NB_DE_26.txt"))
+res_BNB<- read.delim("./B_NB_DE_26.txt")
+res_BNB = res_BNB %>%
+  tibble::rownames_to_column(var = "query")
+head(res_BNB)
+nrow(res_BNB)
+go_input_BNB = res_BNB %>%
+  mutate(mutated_p = -log(pvalue)) %>%
+  mutate(mutated_p_updown = ifelse(log2FoldChange < 0, mutated_p*-1, mutated_p*1)) %>%
+  na.omit() %>%
+  select(query, mutated_p_updown)
+nrow(go_input_BNB)
+#28382
+head(go_input_BNB)
+colnames(go_input_BNB) <- c("gene", "pval")
+head(go_input_BNB)
+write.csv(go_input_BNB, file="./BNB_GO.csv", quote=F, row.names=FALSE)
+
+#res_K5_44
+write.table(res_K5_44, file="./K5_44_DE_26.txt", quote=F, sep="\t")
+head(read.delim("./K5_44_DE_26.txt"))
+res_K544<- read.delim("./K5_44_DE_26.txt")
+res_K544 = res_K544 %>%
+  tibble::rownames_to_column(var = "query")
+head(res_K544)
+nrow(res_K544)
+go_input_K544 = res_K544 %>%
+  mutate(mutated_p = -log(pvalue)) %>%
+  mutate(mutated_p_updown = ifelse(log2FoldChange < 0, mutated_p*-1, mutated_p*1)) %>%
+  na.omit() %>%
+  select(query, mutated_p_updown)
+nrow(go_input_K544)
+#26785
+head(go_input_K544)
+colnames(go_input_K544) <- c("gene", "pval")
+head(go_input_K544)
+write.csv(go_input_K544, file="./K544_GO.csv", quote=F, row.names=FALSE)
+
+#res_M_F
+write.table(res_M_F, file="./M_F_DE_26.txt", quote=F, sep="\t")
+head(read.delim("./M_F_DE_26.txt"))
+res_MF<- read.delim("./M_F_DE_26.txt")
+res_MF = res_MF %>%
+tibble::rownames_to_column(var = "query")
+head(res_MF)
+nrow(res_MF)
+go_input_MF = res_MF %>%
+  mutate(mutated_p = -log(pvalue)) %>%
+  mutate(mutated_p_updown = ifelse(log2FoldChange < 0, mutated_p*-1, mutated_p*1)) %>%
+  na.omit() %>%
+  select(query, mutated_p_updown)
+nrow(go_input_MF)
+#26696
+head(go_input_MF)
+colnames(go_input_MF) <- c("gene", "pval")
+write.csv(go_input_MF, file="./MF_GO.csv", quote=F, row.names=FALSE)
+#1776105370681 in thank god doc
+```
+
+GO on these broad comparisons
+```{r}
+input="BNB_GO.csv"
+goAnnotations="Porites_compressa_iso2go.tab"
+goDatabase="go.obo"
+goDivision="BP"
+source("gomwu.functions.R")
+gomwuStats(input, goDatabase, goAnnotations, goDivision,
+           perlPath="perl",
+           largest=0.1,
+           smallest=5,
+           clusterCutHeight=0.25)
+#168
+resultsBP=gomwuPlot(input,goAnnotations,goDivision,
+                    absValue=1,
+                    level1=0.1,
+                    level2=0.05,
+                    level3=0.01,
+                    txtsize=1.5,
+                    treeHeight=0.5,
+)
+
+input="K544_GO.csv"
+goAnnotations="Porites_compressa_iso2go.tab"
+goDatabase="go.obo"
+goDivision="BP"
+source("gomwu.functions.R")
+gomwuStats(input, goDatabase, goAnnotations, goDivision,
+           perlPath="perl",
+           largest=0.1,
+           smallest=5,
+           clusterCutHeight=0.25)
+#724
+resultsBP=gomwuPlot(input,goAnnotations,goDivision,
+                    absValue=1,
+                    level1=0.1,
+                    level2=0.05,
+                    level3=0.01,
+                    txtsize=1.5,
+                    treeHeight=0.5,
+)
+
+input="MF_GO.csv"
+goAnnotations="Porites_compressa_iso2go.tab"
+goDatabase="go.obo"
+goDivision="BP"
+source("gomwu.functions.R")
+gomwuStats(input, goDatabase, goAnnotations, goDivision,
+           perlPath="perl",
+           largest=0.1,
+           smallest=5,
+           clusterCutHeight=0.25)
+#1042
+resultsBP=gomwuPlot(input,goAnnotations,goDivision,
+                    absValue=1,
+                    level1=0.1,
+                    level2=0.05,
+                    level3=0.01,
+                    txtsize=1.5,
+                    treeHeight=0.5,
+)
+```
+
+Visualizing DEGs for each comparison in volcano plots
+```{r}
+#K5_BF_NBF
+# Add a column to the data frame to specify if they are UP- or DOWN- regulated (log2fc respectively positive or negative)
+resK5_BF_NBF_df <- as.data.frame(resK5_BF_NBF)
+head(resK5_BF_NBF_df)
+resK5_BF_NBF_df <- resK5_BF_NBF_df %>%
+  rownames_to_column(var="query") %>%
+  left_join(gene2query)
+head(resK5_BF_NBF_df)
+resK5_BF_NBF_df$diffexpressed <- "NO"
+head(resK5_BF_NBF_df)
+# if log2Foldchange > 0 and padj < 0.05, set as "UP"
+resK5_BF_NBF_df$diffexpressed[resK5_BF_NBF_df$log2FoldChange > 0 & resK5_BF_NBF_df$padj < 0.05] <- "UP"
+# if log2Foldchange < 0 and padj < 0.05, set as "DOWN"
+resK5_BF_NBF_df$diffexpressed[resK5_BF_NBF_df$log2FoldChange < 0 & resK5_BF_NBF_df$padj < 0.05] <- "DOWN"
+head(resK5_BF_NBF_df)
+
+#volcano plot
+K5_BF_NBF_volc <- ggplot(data = resK5_BF_NBF_df, aes(x = log2FoldChange, y = -log10(padj), fill = diffexpressed)) +
+  #geom_vline(xintercept = c(-0.6, 0.6), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(0.05), col = "gray", linetype = 'dashed') +
+  geom_point(size=2, alpha=0.9, shape=21) +
+  scale_fill_manual(values=c("dodgerblue2", "grey30", "white"), labels = c("Down in BF", "Not significant", "Up in BF")) + # to set the labels in case we want to overwrite the categories from the dataframe (UP, DOWN, NO)
+  #scale_color_manual(values = c("blue")) +  # to set the colours of our variable
+  coord_cartesian(ylim = c(0, 12), xlim = c(-30, 30)) + # since some genes can have minuslog10padj of inf, we set these limits
+  labs(color = '', #legend_title,
+  x = "log<sub>2</sub>FC", y = "-log<sub>10</sub>p-adj") +
+  scale_x_continuous(breaks = seq(-30, 30, 10)) + # to customise the breaks in the x axis
+  theme(panel.background = element_rect(color="black", fill="white"),
+  axis.text = element_text(colour="black", size=10),
+  axis.title.x = ggtext::element_markdown(face="bold", size=12),
+  axis.title.y = ggtext::element_markdown(face="bold",size=12),
+  panel.grid.major = element_line(colour = "gray80", linewidth = 0.5, linetype="dotted"),
+  legend.position="right",
+  legend.background=element_rect(color="black"),
+  legend.text=element_text(face="bold", color="black", size=8),
+  legend.title= element_blank(),
+  legend.text.align = 0,
+  legend.key.size=unit(10,"point"))
+K5_BF_NBF_volc
+#save as K5_BF_NBF_volc as portrait 4x4
+
+#44_BF_NBF
+head(res_44BFNBF)
+#Add a column to the data frame to specify if they are UP- or DOWN- regulated (log2fc respectively positive or negative)
+res44_BF_NBF_df <- as.data.frame(res44_BF_NBF)
+head(res44_BF_NBF_df)
+res44_BF_NBF_df <- res44_BF_NBF_df %>%
+  rownames_to_column(var="query") %>%
+  left_join(gene2query)
+head(res44_BF_NBF_df)
+res44_BF_NBF_df$diffexpressed <- "NO"
+# if log2Foldchange > 0 and padj < 0.05, set as "UP"
+res44_BF_NBF_df$diffexpressed[res44_BF_NBF_df$log2FoldChange > 0 & res44_BF_NBF_df$padj < 0.05] <- "UP"
+# if log2Foldchange < 0 and padj < 0.05, set as "DOWN"
+res44_BF_NBF_df$diffexpressed[res44_BF_NBF_df$log2FoldChange < 0 & res44_BF_NBF_df$padj < 0.05] <- "DOWN"
+
+#Volcano plot
+r44_BF_NBF_volc <- ggplot(data = res44_BF_NBF_df, aes(x = log2FoldChange, y = -log10(padj), fill = diffexpressed)) +
+  #geom_vline(xintercept = c(-0.6, 0.6), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(0.05), col = "gray", linetype = 'dashed') +
+  geom_point(size=2, alpha=0.9, shape=21) +
+  scale_fill_manual(values=c("tomato2", "grey30", "white"), labels = c("Down in BF", "Not significant", "Up in BF")) + # to set the labels in case we want to overwrite the categories from the dataframe (UP, DOWN, NO)
+  #scale_color_manual(values = c("blue")) +  # to set the colours of our variable
+  coord_cartesian(ylim = c(0, 5), xlim = c(-20, 20)) + # since some genes can have minuslog10padj of inf, we set these limits
+  labs(color = '', #legend_title,
+  x = "log<sub>2</sub>FC", y = "-log<sub>10</sub>p-adj") +
+  scale_x_continuous(breaks = seq(-20, 20, 10)) + # to customise the breaks in the x axis
+  theme(panel.background = element_rect(color="black", fill="white"),
+  axis.text = element_text(colour="black", size=10),
+  axis.title.x = ggtext::element_markdown(face="bold", size=12),
+  axis.title.y = ggtext::element_markdown(face="bold",size=12),
+  panel.grid.major = element_line(colour = "gray80", linewidth = 0.5, linetype="dotted"),
+  legend.position="right",
+  legend.background=element_rect(color="black"),
+  legend.text=element_text(face="bold", color="black", size=8),
+  legend.title= element_blank(),
+  legend.text.align = 0,
+  legend.key.size=unit(10,"point"))
+r44_BF_NBF_volc
+#saved as 44_BF_NBF_volc as portrait 4x4
+
+
+
+#K5 BM BF
+head(res_K5BMBF)
+summary(resK5_BM_BF, alpha=0.05)
+#LFC > 0 (up)       : 123, 0.3%
+#LFC < 0 (down)     : 59, 0.15%
+# Add a column to the data frame to specify if they are UP- or DOWN- regulated (log2fc respectively positive or negative)
+resK5_BM_BF_df <- as.data.frame(resK5_BM_BF)
+head(resK5_BM_BF_df)
+resK5_BM_BF_df <- resK5_BM_BF_df %>%
+  rownames_to_column(var="query") %>%
+  left_join(gene2query)
+head(resK5_BM_BF_df)
+resK5_BM_BF_df$diffexpressed <- "NO"
+# if log2Foldchange > 0 and padj < 0.05, set as "UP"
+resK5_BM_BF_df$diffexpressed[resK5_BM_BF_df$log2FoldChange > 0 & resK5_BM_BF_df$padj < 0.05] <- "UP"
+# if log2Foldchange < 0 and padj < 0.05, set as "DOWN"
+resK5_BM_BF_df$diffexpressed[resK5_BM_BF_df$log2FoldChange < 0 & resK5_BM_BF_df$padj < 0.05] <- "DOWN"
+
+#Volcano plot
+K5_BM_BF_volc <- ggplot(data = resK5_BM_BF_df, aes(x = log2FoldChange, y = -log10(padj), shape = diffexpressed, fill=diffexpressed)) +
+  geom_vline(xintercept = 0, col = "gray80", linetype = 'dotted') +
+geom_hline(yintercept = -log10(0.05), col = "gray", linetype = 'dashed') +
+geom_point(size=2, alpha=0.9) +
+scale_shape_manual(values=c(25, 21, 24), labels = c("Down in M", "Not significant", "Up in M"))+
+scale_fill_manual(values=c("dodgerblue2", "grey30", "dodgerblue2"), labels = c("Down in M", "Not significant", "Up in M")) + # to set the labels in case we want to overwrite the categories from the dataframe (UP, DOWN, NO)
+#scale_color_manual(values = c("blue")) +  # to set the colours of our variable
+coord_cartesian(ylim = c(0, 5), xlim = c(-25, 25)) + # since some genes can have minuslog10padj of inf, we set these limits
+labs(color = '', #legend_title,
+x = "log<sub>2</sub>FC", y = "-log<sub>10</sub>p-adj") +
+scale_x_continuous(breaks = seq(-25, 25, 10)) + # to customise the breaks in the x axis
+theme(panel.background = element_rect(color="black", fill="white"),
+axis.text = element_text(colour="black", size=10),
+axis.title.x = ggtext::element_markdown(face="bold", size=12),
+axis.title.y = ggtext::element_markdown(face="bold",size=12),
+panel.grid.major = element_line(colour = "gray80", linewidth = 0.5, linetype="dotted"),
+legend.position="right",
+legend.background=element_rect(color="black"),
+legend.text=element_text(face="bold", color="black", size=8),
+legend.title= element_blank(),
+legend.text.align = 0,
+legend.key.size=unit(10,"point"))
+
+K5_BM_BF_volc
+#saved as K5_BM_BF_volc as portrait 4x4
+```
+
+Venn Diagram comparing degs from K5 and 44 BF NBF
+```{r}
+head(resK5_BF_NBF)
+resK5_BF_NBF <- read.delim("./K5_BF_NBF_DE_26.txt")
+head(resK5_BF_NBF)
+resK5_BF_NBF$lfc_K5 <- resK5_BF_NBF$log2FoldChange
+head(resK5_BF_NBF)
+res44_BF_NBF <- read.delim("./44_BF_NBF_DE_26.txt")
+res44_BF_NBF
+res44_BF_NBF$lfc_44 <- res44_BF_NBF$log2FoldChange
+head(res44_BF_NBF)
+# look at ALL DEGs
+K5_DEGs05=row.names(resK5_BF_NBF[resK5_BF_NBF$padj<0.05 & !is.na(resK5_BF_NBF$padj),])
+length(resK5_BF_NBF)
+length(K5_DEGs05) #135
+r44_DEGs05=row.names(res44_BF_NBF[res44_BF_NBF$padj<0.05 & !is.na(res44_BF_NBF$padj),])
+length(r44_DEGs05) #23
+candidates_K544=list("K5"=K5_DEGs05, "44"=r44_DEGs05)
+
+prettyvenn=venn.diagram(
+  x = candidates_K544,
+  category.names=c("K5 (135)", "44 (23)"),
+  col=c("black","black"),
+  lwd=c(3,3),
+  filename=NULL,
+  #main = "DEGs Under Starvation",
+  main.cex = 2,
+  main.fontface = "bold",
+  main.fontfamily = "sans",
+  #col = "transparent",
+  fill = c("dodgerblue2","tomato2"),
+  alpha = 0.3,
+  cex = 2,
+  fontfamily = "sans",
+  fontface = "bold",
+  cat.default.pos = "text",
+  cat.col = c("black", "black"),
+  cat.cex = 1.5,
+  cat.fontfamily = "sans",
+  cat.dist = c(0.25, 0.14),
+  cat.pos = c(-14.5, -3)
+  )
+grid.draw(prettyvenn)
+#saved as K544DEG_Venn as 5x5
+```
+
+read back in GO outputs for comparing GO terms
+```{r}
+#K5 BFNBF
+go_bp_K5BFNBF <- read.csv("./MWU_BP_K5BFNBF_GO.csv", header=TRUE, sep=" ")
+head(go_bp_K5BFNBF)
+write.table(go_bp_K5BFNBF, "./MWU_BP_K5BFNBF.txt", quote=F, sep="\t", row.names=FALSE)
+bp_K5BFNBF = read.csv("./BP_K5BFNBF_GO.csv", sep="\t")
+head(bp_K5BFNBF)
+colnames(bp_K5BFNBF)[4]="query"
+
+go_bp_K5BFNBF_UP <- go_bp_K5BFNBF %>%
+  subset(go_bp_K5BFNBF$p.adj < 0.1 & go_bp_K5BFNBF$delta.rank > 0)
+top20_K5BFNBF_UP <- top_n(go_bp_K5BFNBF_UP, -20, p.adj)
+go_bp_K5BFNBF_DOWN <- go_bp_K5BFNBF %>%
+  subset(go_bp_K5BFNBF$p.adj < 0.1 & go_bp_K5BFNBF$delta.rank < 0)
+top20_K5BFNBF_DOWN <- top_n(go_bp_K5BFNBF_DOWN, -20, p.adj)
+
+#44 BFNBF
+go_bp_44BFNBF <- read.csv("./MWU_BP_44BFNBF_GO.csv", header=TRUE, sep=" ")
+head(go_bp_44BFNBF)
+write.table(go_bp_44BFNBF, "./MWU_BP_44BFNBF.txt", quote=F, sep="\t", row.names=FALSE)
+bp_44BFNBF = read.csv("./BP_44BFNBF_GO.csv", sep="\t")
+head(bp_44BFNBF)
+colnames(bp_44BFNBF)[4]="query"
+
+go_bp_44BFNBF_UP <- go_bp_44BFNBF %>%
+  subset(go_bp_44BFNBF$p.adj < 0.1 & go_bp_44BFNBF$delta.rank > 0)
+top20_44BFNBF_UP <- top_n(go_bp_44BFNBF_UP, -20, p.adj)
+go_bp_44BFNBF_DOWN <- go_bp_44BFNBF %>%
+  subset(go_bp_44BFNBF$p.adj < 0.1 & go_bp_44BFNBF$delta.rank < 0)
+top20_44BFNBF_DOWN <- top_n(go_bp_44BFNBF_DOWN, -20, p.adj)
+```
+
+compare the two sets
+```{r}
+go_bp_44BFNBF_SIG <- go_bp_44BFNBF %>%
+  subset(go_bp_44BFNBF$p.adj < 0.1)
+go_bp_K5BFNBF_SIG <- go_bp_K5BFNBF %>%
+  subset(go_bp_K5BFNBF$p.adj < 0.1)
+# look at ALL sig GOs
+K5_DEGOs=go_bp_K5BFNBF_SIG$term
+length(K5_DEGOs)
+#775
+r44_DEGOs=go_bp_44BFNBF_SIG$term
+length(r44_DEGOs)
+#551
+candidates_K544GO=list("K5"=K5_DEGOs, "44"=r44_DEGOs)
+
+prettyvenn=venn.diagram(
+  x = candidates_K544GO,
+  category.names=c("K5 (775)", "44 (551)"),
+  col=c("black","black"),
+  lwd=c(3,3),
+  filename=NULL,
+  #main = "DEGs Under Starvation",
+  main.cex = 2,
+  main.fontface = "bold",
+  main.fontfamily = "sans",
+  #col = "transparent",
+  fill = c("dodgerblue2","tomato2"),
+  alpha = 0.3,
+  cex = 2,
+  fontfamily = "sans",
+  fontface = "bold",
+  cat.default.pos = "text",
+  cat.col = c("black", "black"),
+  cat.cex = 1.5,cat.fontfamily = "sans",
+  cat.dist = c(0.22, 0.20),
+  cat.pos = c(-14.5, -3)
+  )
+grid.draw(prettyvenn) #saved as K544GO_Venn
+```
+
+look at the shared GOs
+```{r}
+intersect05 <- intersect(K5_DEGOs, r44_DEGOs)
+
+#install.packages("ggpubr")
+library(ggpubr)
+
+head(go_bp_K5BFNBF_SIG)
+shared_K5 <- as.data.frame(go_bp_K5BFNBF_SIG)[go_bp_K5BFNBF_SIG$term %in% intersect05, ] %>% select(delta.rank, term)
+k5_name <- c("K5_delta_rank", "term")
+colnames(shared_K5) <- k5_name
+shared_44 <- as.data.frame(go_bp_44BFNBF_SIG)[go_bp_44BFNBF_SIG$term %in% intersect05, ] %>% select(delta.rank, term)
+r44_name <- c("r44_delta_rank", "term")
+colnames(shared_44) <- r44_name
+shared_both_delta <- full_join(shared_K5, shared_44)
+View(shared_both_delta)
+head(shared_both_delta)
+
+GO_scatter2 <- ggscatter(shared_both_delta, x = "K5_delta_rank", y = "r44_delta_rank",
+  add = "reg.line", conf.int = TRUE,
+  cor.coef = TRUE, cor.method = "pearson",
+  xlab = "GO Delta Rank - K5", ylab = "GO Delta Rank - 44")+ theme(panel.grid.major = element_line(colour = "gray80", linewidth = 0.5, linetype="dotted"))
+#saved as shared_DEGO_correlation as 5x5
+
+head(shared_both_delta)
+shared_both_delta_name <- shared_both_delta %>%
+  left_join(go_bp_44BFNBF_SIG) %>%
+  select(-K5_delta_rank)
+```
+
+Make barplots with the top20 up and down
+```{r}
+head(top20_K5BFNBF_UP)
+top20_K5BFNBF_UP_plot <- ggplot(top20_K5BFNBF_UP, aes(x=name, y=delta.rank)) +
+  geom_bar(stat = "identity", fill = "white", color = "dodgerblue2", alpha = 0.75 ) +
+  #scale_fill_manual(values = "white" ) +
+  #scale_color_manual(values = "dodgerblue2") +
+  coord_flip( ) +
+  theme(panel.background = element_rect(color="black", fill="white"),
+  axis.text = element_text(colour="black", size=10),
+  axis.title.x = ggtext::element_markdown(face="bold", size=12),
+  axis.title.y = ggtext::element_markdown(face="bold",size=12),
+  panel.grid.major = element_line(colour = "gray80", linewidth = 0.5, linetype="dotted"),
+  legend.position="right",
+  legend.background=element_rect(color="black"),
+  legend.text=element_text(face="bold", color="black", size=8),
+  legend.title= element_blank(),
+  legend.text.align = 0,
+  legend.key.size=unit(10,"point"))
+top20_K5BFNBF_UP_plot
+#top20_K5BFNBF_UP_plot as 6x4
+
+top20_K5BFNBF_DOWN_plot <- ggplot(top20_K5BFNBF_DOWN, aes(x=name, y=delta.rank)) +
+  geom_bar(stat = "identity", fill = "dodgerblue", color = "dodgerblue2", alpha=0.75 ) +
+  #scale_fill_manual(values = "white" ) +
+  #scale_color_manual(values = "dodgerblue2") +
+  coord_flip( ) +
+  theme(panel.background = element_rect(color="black", fill="white"),
+  axis.text = element_text(colour="black", size=10),
+  axis.title.x = ggtext::element_markdown(face="bold", size=12),
+  axis.title.y = ggtext::element_markdown(face="bold",size=12),
+  panel.grid.major = element_line(colour = "gray80", linewidth = 0.5, linetype="dotted"),
+  legend.position="right",
+  legend.background=element_rect(color="black"),
+  legend.text=element_text(face="bold", color="black", size=8),
+  legend.title= element_blank(),
+  legend.text.align = 0,
+  legend.key.size=unit(10,"point"))
+top20_K5BFNBF_DOWN_plot
+#top20_K5BFNBF_DOWN_plot
+
+top20_44BFNBF_UP_plot <- ggplot(top20_44BFNBF_UP, aes(x=name, y=delta.rank)) +
+  geom_bar(stat = "identity", fill = "white", color = "tomato2", alpha = 0.75 ) +
+  #scale_fill_manual(values = "white" ) +
+  #scale_color_manual(values = "tomato2") +
+  coord_flip( ) +
+  theme(panel.background = element_rect(color="black", fill="white"),
+  axis.text = element_text(colour="black", size=10),
+  axis.title.x = ggtext::element_markdown(face="bold", size=12),
+  axis.title.y = ggtext::element_markdown(face="bold",size=12),
+  panel.grid.major = element_line(colour = "gray80", linewidth = 0.5, linetype="dotted"),
+  legend.position="right",
+  legend.background=element_rect(color="black"),
+  legend.text=element_text(face="bold", color="black", size=8),
+  legend.title= element_blank(),
+  legend.text.align = 0,
+  legend.key.size=unit(10,"point"))
+top20_44BFNBF_UP_plot
+#top20_44BFNBF_UP_plot
+
+top20_44BFNBF_DOWN_plot <- ggplot(top20_44BFNBF_DOWN, aes(x=name, y=delta.rank)) +
+  geom_bar(stat = "identity", fill = "tomato2", color = "tomato2", alpha=0.75 ) +
+  #scale_fill_manual(values = "white" ) +
+  #scale_color_manual(values = "tomato") +
+  coord_flip( ) +
+  theme(panel.background = element_rect(color="black", fill="white"),
+  axis.text = element_text(colour="black", size=10),
+  axis.title.x = ggtext::element_markdown(face="bold", size=12),
+  axis.title.y = ggtext::element_markdown(face="bold",size=12),
+  panel.grid.major = element_line(colour = "gray80", linewidth = 0.5, linetype="dotted"),
+  legend.position="right",
+  legend.background=element_rect(color="black"),
+  legend.text=element_text(face="bold", color="black", size=8),
+  legend.title= element_blank(),
+  legend.text.align = 0,
+  legend.key.size=unit(10,"point"))
+top20_44BFNBF_DOWN_plot
+#top20_44BFNBF_DOWN_plot
+```
+return to big picture comparisons to add up and down DEGs markers to make volcano plots
+```{r}
+#all M to F
+head(res_MF)
+#volcano plot
+# Add a column to the data frame to specify if they are UP- or DOWN- regulated (log2fc respectively positive or negative)
+res_M_F_df <- as.data.frame(res_M_F)
+head(res_M_F_df)
+res_M_F_df <- res_M_F_df %>%
+  rownames_to_column(var="query") %>%
+  left_join(gene2query)
+head(res_M_F_df)
+res_M_F_df$diffexpressed <- "NO"
+# if log2Foldchange > 0 and padj < 0.05, set as "UP"
+res_M_F_df$diffexpressed[res_M_F_df$log2FoldChange > 0 & res_M_F_df$padj < 0.05] <- "UP"
+# if log2Foldchange < 0 and padj < 0.05, set as "DOWN"
+res_M_F_df$diffexpressed[res_M_F_df$log2FoldChange < 0 & res_M_F_df$padj < 0.05] <- "DOWN"
+head(res_M_F_df)
+res_MF_05 <- as.data.frame(res_MF[which(res_MF$padj < 0.05), ])
+
+M_F_volc <- ggplot(data = res_M_F_df, aes(x = log2FoldChange, y = -log10(padj), shape = diffexpressed, fill=diffexpressed)) +
+  geom_vline(xintercept = 0, col = "gray80", linetype = 'dotted') +
+  geom_hline(yintercept = -log10(0.05), col = "gray", linetype = 'dashed') +
+  geom_point(size=2, alpha=0.9) +
+  scale_shape_manual(values=c(25, 21, 24), labels = c("Down in M", "Not significant", "Up in M"))+
+  scale_fill_manual(values=c("orchid3", "grey30", "orchid3"), labels = c("Down in M", "Not significant", "Up in M")) + # to set the labels in case we want to overwrite the categories from the dataframe (UP, DOWN, NO)
+  #scale_color_manual(values = c("blue")) +  # to set the colours of our variable
+  coord_cartesian(ylim = c(0, 6), xlim = c(-25, 25)) + # since some genes can have minuslog10padj of inf, we set these limits
+  labs(color = '', #legend_title,
+  x = "log<sub>2</sub>FC", y = "-log<sub>10</sub>p-adj") +
+  scale_x_continuous(breaks = seq(-25, 25, 10)) + # to customise the breaks in the x axis
+  theme(panel.background = element_rect(color="black", fill="white"),
+  axis.text = element_text(colour="black", size=10),
+  axis.title.x = ggtext::element_markdown(face="bold", size=12),
+  axis.title.y = ggtext::element_markdown(face="bold",size=12),
+  panel.grid.major = element_line(colour = "gray80", linewidth = 0.5, linetype="dotted"),
+  legend.position="right",
+  legend.background=element_rect(color="black"),
+  legend.text=element_text(face="bold", color="black", size=8),
+  legend.title= element_blank(),
+  legend.text.align = 0,
+  legend.key.size=unit(10,"point"))
+M_F_volc
+#M_F_volc as 6 x 4
+
+#all K5 to 44
+head(res_K5_44)
+#volcano plot
+# Add a column to the data frame to specify if they are UP- or DOWN- regulated (log2fc respectively positive or negative)
+res_K5_44_df <- as.data.frame(res_K5_44)
+head(res_K5_44_df)
+res_K5_44_df <- res_K5_44_df %>%
+  rownames_to_column(var="query") %>%
+  left_join(gene2query)
+head(res_K5_44_df)
+res_K5_44_df$diffexpressed <- "NO"
+# if log2Foldchange > 0 and padj < 0.05, set as "UP"
+res_K5_44_df$diffexpressed[res_K5_44_df$log2FoldChange > 0 & res_K5_44_df$padj < 0.05] <- "UP"
+# if log2Foldchange < 0 and padj < 0.05, set as "DOWN"
+res_K5_44_df$diffexpressed[res_K5_44_df$log2FoldChange < 0 & res_K5_44_df$padj < 0.05] <- "DOWN"
+head(res_K5_44_df)
+res_K544_05 <- as.data.frame(res_K544[which(res_K544$padj < 0.05), ])
+
+K5_44_volc <- ggplot(data = res_K5_44_df, aes(x = log2FoldChange, y = -log10(padj), shape = diffexpressed, fill=diffexpressed)) +
+  geom_vline(xintercept = 0, col = "gray80", linetype = 'dotted') +
+  geom_hline(yintercept = -log10(0.05), col = "gray", linetype = 'dashed') +
+  geom_point(size=2, alpha=0.9, shape=21) +
+  #scale_shape_manual(values=c(25, 21, 24), labels = c("Down in K5", "Not significant", "Up in K5"))+
+  scale_fill_manual(values=c("tomato2", "grey30", "dodgerblue2"), labels = c("Down in K5", "Not significant", "Up in K5")) + # to set the labels in case we want to overwrite the categories from the dataframe (UP, DOWN, NO)
+  #scale_color_manual(values = c("blue")) +  # to set the colours of our variable
+  coord_cartesian(ylim = c(0, 6), xlim = c(-10, 10)) + # since some genes can have minuslog10padj of inf, we set these limits
+  labs(color = '', #legend_title,
+  x = "log<sub>2</sub>FC", y = "-log<sub>10</sub>p-adj") +
+  scale_x_continuous(breaks = seq(-10, 10, 2)) + # to customise the breaks in the x axis
+  theme(panel.background = element_rect(color="black", fill="white"),
+  axis.text = element_text(colour="black", size=10),
+  axis.title.x = ggtext::element_markdown(face="bold", size=12),
+  axis.title.y = ggtext::element_markdown(face="bold",size=12),
+  panel.grid.major = element_line(colour = "gray80", linewidth = 0.5, linetype="dotted"),
+  legend.position="right",
+  legend.background=element_rect(color="black"),
+  legend.text=element_text(face="bold", color="black", size=8),
+  legend.title= element_blank(),
+  legend.text.align = 0,
+  legend.key.size=unit(10,"point"))
+K5_44_volc
+#K5_44_volc 6x4
+
+#all Bleach to all Non-Bleach
+head(res_BNB)
+#volcano plot
+# Add a column to the data frame to specify if they are UP- or DOWN- regulated (log2fc respectively positive or negative)
+res_B_NB_df <- as.data.frame(res_B_NB)
+head(res_B_NB_df)
+res_B_NB_df <- res_B_NB_df %>%
+  rownames_to_column(var="query") %>%
+  left_join(gene2query)
+head(res_B_NB_df)
+res_B_NB_df$diffexpressed <- "NO"
+# if log2Foldchange > 0 and padj < 0.05, set as "UP"
+res_B_NB_df$diffexpressed[res_B_NB_df$log2FoldChange > 0 & res_B_NB_df$padj < 0.05] <- "UP"
+# if log2Foldchange < 0 and padj < 0.05, set as "DOWN"
+res_B_NB_df$diffexpressed[res_B_NB_df$log2FoldChange < 0 & res_B_NB_df$padj < 0.05] <- "DOWN"
+head(res_B_NB_df)
+
+B_NB_volc <- ggplot(data = res_B_NB_df, aes(x = log2FoldChange, y = -log10(padj), shape = diffexpressed, fill=diffexpressed)) +
+  geom_vline(xintercept = 0, col = "gray80", linetype = 'dotted') +
+  geom_hline(yintercept = -log10(0.05), col = "gray", linetype = 'dashed') +
+  geom_point(size=2, alpha=0.9, shape=21) +
+  #scale_shape_manual(values=c(25, 21, 24), labels = c("Downregulated", "Not significant", "Upregulated"))+
+  scale_fill_manual(values=c("orchid3", "grey30", "white"), labels = c("Down in B", "Not significant", "Up in B")) + # to set the labels in case we want to overwrite the categories from the dataframe (UP, DOWN, NO)
+  #scale_color_manual(values = c("blue")) +  # to set the colours of our variable
+  coord_cartesian(ylim = c(0, 4), xlim = c(-10, 10)) + # since some genes can have minuslog10padj of inf, we set these limits
+  labs(color = '', #legend_title,
+  x = "log<sub>2</sub>FC", y = "-log<sub>10</sub>p-adj") +
+  scale_x_continuous(breaks = seq(-10, 10, 2)) + # to customise the breaks in the x axis
+  theme(panel.background = element_rect(color="black", fill="white"),
+  axis.text = element_text(colour="black", size=10),
+  axis.title.x = ggtext::element_markdown(face="bold", size=12),
+  axis.title.y = ggtext::element_markdown(face="bold",size=12),
+  panel.grid.major = element_line(colour = "gray80", linewidth = 0.5, linetype="dotted"),
+  legend.position="right",
+  legend.background=element_rect(color="black"),
+  legend.text=element_text(face="bold", color="black", size=8),
+  legend.title= element_blank(),
+  legend.text.align = 0,
+  legend.key.size=unit(10,"point"))
+B_NB_volc
+#B_NB_volc 6x4
+```
+
+reading in GO outputs for K5BMBF for top20
+```{r}
+go_bp_K5BMBF <- read.csv("./MWU_BP_K5BMBF_GO.csv", header=TRUE, sep=" ")
+write.table(go_bp_K5BMBF, "./MWU_BP_K5BMBF.txt", quote=F, sep="\t", row.names=FALSE)
+bp_K5BMBF = read.csv("./BP_K5BMBF_GO.csv", sep="\t")
+head(bp_K5BMBF)
+colnames(bp_K5BMBF)[4]="query"
+go_bp_K5BMBF_SIG <- go_bp_K5BMBF %>%
+  subset(go_bp_K5BMBF$p.adj < 0.1)
+
+go_bp_K5BMBF_UP <- go_bp_K5BMBF %>%
+  subset(go_bp_K5BMBF$p.adj < 0.1 & go_bp_K5BMBF$delta.rank > 0)
+top20_K5BMBF_UP <- top_n(go_bp_K5BMBF_UP, -20, p.adj)
+
+go_bp_K5BMBF_DOWN <- go_bp_K5BMBF %>%
+  subset(go_bp_K5BMBF$p.adj < 0.1 & go_bp_K5BMBF$delta.rank < 0)
+top20_K5BMBF_DOWN <- top_n(go_bp_K5BMBF_DOWN, -20, p.adj)
+
+#install.packages("ggpattern")
+library(ggpattern)
+
+top20_K5BMBF_UP_plot <- ggplot(top20_K5BMBF_UP, aes(x=name, y=delta.rank)) +
+  #geom_bar(stat = "identity", fill = "white", color = "dodgerblue2", alpha = 0.75 ) +
+  geom_col_pattern(pattern = "pch", pattern_shape = 24, pattern_angle = 0, pattern_color = "dodgerblue2", stat = "identity", fill = "white", color = "dodgerblue2", alpha = 0.75 )+
+  #scale_fill_manual(values = "white" ) +
+  #scale_color_manual(values = "dodgerblue2") +
+  coord_flip( ) +
+  theme(panel.background = element_rect(color="black", fill="white"),
+  axis.text = element_text(colour="black", size=10),
+  axis.title.x = ggtext::element_markdown(face="bold", size=12),
+  axis.title.y = ggtext::element_markdown(face="bold",size=12),
+  panel.grid.major = element_line(colour = "gray80", linewidth = 0.5, linetype="dotted"),
+  legend.position="right",
+  legend.background=element_rect(color="black"),
+  legend.text=element_text(face="bold", color="black", size=8),
+  legend.title= element_blank(),
+  legend.text.align = 0,
+  legend.key.size=unit(10,"point"))
+top20_K5BMBF_UP_plot #saved
+
+top20_K5BMBF_DOWN_plot <- ggplot(top20_K5BMBF_DOWN, aes(x=name, y=delta.rank)) +
+  #geom_bar(stat = "identity", fill = "white", color = "dodgerblue2", alpha = 0.75 ) +
+  geom_col_pattern(pattern = "pch", pattern_shape = 25, pattern_angle = 0, pattern_color = "dodgerblue2", stat = "identity", fill = "white", color = "dodgerblue2", alpha = 0.75 )+
+  #scale_fill_manual(values = "white" ) +
+  #scale_color_manual(values = "dodgerblue2") +
+  coord_flip( ) +
+  theme(panel.background = element_rect(color="black", fill="white"),
+  axis.text = element_text(colour="black", size=10),
+  axis.title.x = ggtext::element_markdown(face="bold", size=12),
+  axis.title.y = ggtext::element_markdown(face="bold",size=12),
+  panel.grid.major = element_line(colour = "gray80", linewidth = 0.5, linetype="dotted"),
+  legend.position="right",
+  legend.background=element_rect(color="black"),
+  legend.text=element_text(face="bold", color="black", size=8),
+  legend.title= element_blank(),
+  legend.text.align = 0,
+  legend.key.size=unit(10,"point"))
+top20_K5BMBF_DOWN_plot #saved
+```
+
+pulling DEGs for each portion of GO venn
+```{r}
+bp_K5BFNBF_q2term2name <- bp_K5BFNBF[,c(1,2,4)] %>%
+  subset(term %in% go_bp_K5BFNBF_SIG$term)
+length(unique(bp_K5BFNBF_q2term2name$query))
+length(unique(bp_K5BFNBF_q2term2name$term))
+#775
+length(unique(bp_K5BFNBF_q2term2name$query))
+#9510
+
+head(shared_both_delta)
+bp_K5BFNBF_q2term2nameSHARED <- bp_K5BFNBF[,c(1,2,4)] %>%
+  subset(term %in% shared_both_delta$term)
+length(unique(bp_K5BFNBF_q2term2name$term))
+length(unique(bp_K5BFNBF_q2term2nameSHARED$term))
+#212
+length(unique(bp_K5BFNBF_q2term2nameSHARED$query))
+#7335
+
+bp_44BFNBF_q2term2nameSHARED <- bp_44BFNBF[,c(1,2,4)] %>%
+  subset(term %in% shared_both_delta$term)
+length(unique(bp_44BFNBF_q2term2nameSHARED$term))
+#212
+length(unique(bp_44BFNBF_q2term2nameSHARED$query))
+#7120
+head(bp_44BFNBF_q2term2nameSHARED)
+
+K5_DEGs05_df=resK5_BF_NBF_df[resK5_BF_NBF_df$padj<0.05 & !is.na(resK5_BF_NBF_df$padj),]
+K5_DEGs05_df_GO <- K5_DEGs05_df %>%
+  subset(query %in% bp_K5BFNBF_q2term2nameSHARED$query)
+head(K5_DEGs05_df_GO)
+nrow(K5_DEGs05_df_GO)
+#20
+
+rld_df <- as.data.frame(rld)
+K5_DEGs05_df_shared <- K5_DEGs05_df %>%
+  subset(query %in% bp_K5BFNBF_q2term2nameSHARED$query)
+head(K5_DEGs05_df_shared)
+rld_df_name_K5_shared <- rld_df %>%
+  rownames_to_column(var="query") %>%
+  right_join(K5_DEGs05_df_shared) %>%
+  select(-baseMean, -log2FoldChange, -lfcSE, -stat, -pvalue, -padj, -lfc_K5, -diffexpressed, -query) %>%
+  column_to_rownames(var="gene_ID")
+
+
+##plot the DEGs from K5 that have a shared DEG with 44
+#subset out k5
+rld_df_name_K5_shared <- rld_df_name_K5_shared[,c(1,6,13,2,9,10)]
+k5_shared_means = apply(rld_df_name_K5_shared, 1, mean)
+explc_k5_shared = rld_df_name_K5_shared-k5_shared_means
+
+k5_shared_hm <- pheatmap(as.matrix(explc_k5_shared),
+  color=rev(colorRampPalette(brewer.pal(n=11, name="RdBu"))(20)),
+  cluster_rows = T, show_rownames = T, fontsize_row=8, fontsize_col=10, treeheight_row = 10, treeheight_col = 10,
+  cluster_cols = F, show_colnames = T, angle_col= "315", cellheight = 8, cellwidth = 14,
+  breaks=c(seq(from=-2,to=2,by=0.2)),
+  scale="none",
+  legend=T)
+
+#same for 44
+bp_44BFNBF_q2term2nameSHARED <- bp_44BFNBF[,c(1,2,4)] %>%
+  subset(term %in% shared_both_delta$term)
+length(unique(bp_44BFNBF_q2term2nameSHARED$term))
+#212
+length(unique(bp_44BFNBF_q2term2nameSHARED$query))
+#7120
+r44_DEGs05_df=res44_BF_NBF_df[res44_BF_NBF_df$padj<0.05 & !is.na(res44_BF_NBF_df$padj),]
+r44_DEGs05_df_shared <- r44_DEGs05_df %>%
+  subset(query %in% bp_44BFNBF_q2term2nameSHARED$query)
+head(r44_DEGs05_df_shared)
+nrow(r44_DEGs05_df_shared)
+#5
+rld_df_name_44_shared <- rld_df %>%
+  rownames_to_column(var="query") %>%
+  right_join(r44_DEGs05_df_shared) %>%
+  select(-baseMean, -log2FoldChange, -lfcSE, -stat, -pvalue, -padj, -lfc_44, -diffexpressed, -query) %>%
+  column_to_rownames(var="gene_ID")
+##plot the DEGs from 44 that have a shared GO with K5
+#subset out 44
+rld_df_name_44_shared <- rld_df_name_44_shared[,c(3,11,12,4,5,15)]
+r44_shared_means = apply(rld_df_name_44_shared, 1, mean)
+explc_44_shared = rld_df_name_44_shared-r44_shared_means
+
+r44_shared_hm <- pheatmap(as.matrix(explc_44_shared),
+  color=rev(colorRampPalette(brewer.pal(n=11, name="RdBu"))(20)),
+  cluster_rows = T, show_rownames = T, fontsize_row=8, fontsize_col=10, treeheight_row = 10, treeheight_col = 10,
+  cluster_cols = F, show_colnames = T, angle_col= "315", cellheight = 8, cellwidth = 14,
+  breaks=c(seq(from=-2,to=2,by=0.2)),
+  scale="none",
+  legend=T)
+```
+
+now get the uniques
+```{r}
+#k5
+bp_K5BFNBF_SIG <- bp_K5BFNBF %>%
+  subset(term %in% go_bp_K5BFNBF_SIG$term)
+length(unique(bp_K5BFNBF_SIG$term))
+#775
+bp_K5BFNBF_q2term2nameUNIQUE <- bp_K5BFNBF_SIG[,c(1,2,4)] %>%
+  subset(!(term %in% shared_both_delta$term))
+length(unique(bp_K5BFNBF_q2term2nameUNIQUE$term))
+#563
+
+K5_DEGs05_df_unique <- K5_DEGs05_df %>%
+  subset(query %in% bp_K5BFNBF_q2term2nameUNIQUE$query)
+nrow(K5_DEGs05_df_unique)
+#26
+
+rld_df_name_K5_unique <- rld_df %>%
+  rownames_to_column(var="query") %>%
+  right_join(K5_DEGs05_df_unique) %>%
+  select(-baseMean, -log2FoldChange, -lfcSE, -stat, -pvalue, -padj, -lfc_K5, -diffexpressed, -query) %>%
+  column_to_rownames(var="gene_ID")
+head(rld_df_name_K5_unique)
+
+#subset out k5
+rld_df_name_K5_unique <- rld_df_name_K5_unique[,c(1,6,13,2,9,10)]
+k5_unique_means = apply(rld_df_name_K5_unique, 1, mean)
+explc_k5_unique = rld_df_name_K5_unique-k5_unique_means
+
+k5_unique_hm <- pheatmap(as.matrix(explc_k5_unique),
+  color=rev(colorRampPalette(brewer.pal(n=11, name="RdBu"))(20)),
+  cluster_rows = T, show_rownames = T, fontsize_row=8, fontsize_col=10, treeheight_row = 10, treeheight_col = 10,
+  cluster_cols = F, show_colnames = T, angle_col= "315", cellheight = 8, cellwidth = 14,
+  breaks=c(seq(from=-2,to=2,by=0.2)),
+  scale="none",
+  legend=T)
+
+bp_K5BFNBF_q2term2nameUNIQUE_name <- unique(bp_K5BFNBF_q2term2nameUNIQUE$name)
+go_bp_K5BFNBF_SIG_unique <- go_bp_K5BFNBF_SIG %>%
+  subset(term %in% bp_K5BFNBF_q2term2nameUNIQUE$term)
+
+#44
+bp_44BFNBF_SIG <- bp_44BFNBF %>%
+  subset(term %in% go_bp_44BFNBF_SIG$term)
+bp_44BFNBF_q2term2nameUNIQUE <- bp_44BFNBF_SIG[,c(1,2,4)] %>%
+  subset(!(term %in% shared_both_delta$term))
+length(unique(bp_44BFNBF_q2term2nameUNIQUE$term))
+#339
+length(unique(bp_44BFNBF_q2term2nameUNIQUE$query))
+
+bp_44BFNBF_SIG <- bp_44BFNBF %>%
+  subset(term %in% go_bp_44BFNBF_SIG$term)
+bp_44BFNBF_q2term2nameUNIQUE <- bp_44BFNBF_SIG[,c(1,2,4)] %>%
+  subset(!(term %in% shared_both_delta$term))
+length(unique(bp_44BFNBF_q2term2nameUNIQUE$term))
+#339
+go_bp_44BFNBF_SIG_unique <- go_bp_44BFNBF_SIG %>%
+  subset(term %in% bp_44BFNBF_q2term2nameUNIQUE$term)
+length(unique(bp_44BFNBF_q2term2nameUNIQUE$query))
+nrow(r44_DEGs05_df)
+#23
+r44_DEGs05_df_unique <- r44_DEGs05_df %>%
+  subset(query %in% bp_44BFNBF_q2term2nameUNIQUE$query)
+head(r44_DEGs05_df_unique)
+nrow(r44_DEGs05_df_unique)
+#4
+rld_df_name_44_unique <- rld_df %>%
+  rownames_to_column(var="query") %>%
+  right_join(r44_DEGs05_df_unique) %>%
+  select(-baseMean, -log2FoldChange, -lfcSE, -stat, -pvalue, -padj, -lfc_44, -diffexpressed, -query) %>%
+  column_to_rownames(var="gene_ID")
+
+##plot!
+#subset out 44
+rld_df_name_44_unique <- rld_df_name_44_unique[,c(3,11,12,4,5,15)]
+r44_unique_means = apply(rld_df_name_44_unique, 1, mean)
+explc_44_unique = rld_df_name_44_unique-r44_unique_means
+r44_unique_hm <- pheatmap(as.matrix(explc_44_unique),
+  color=rev(colorRampPalette(brewer.pal(n=11, name="RdBu"))(20)),
+  cluster_rows = T, show_rownames = T, fontsize_row=8, fontsize_col=10, treeheight_row = 10, treeheight_col = 10,
+  cluster_cols = F, show_colnames = T, angle_col= "315", cellheight = 8, cellwidth = 14,
+  breaks=c(seq(from=-2,to=2,by=0.2)),
+  scale="none",
+  legend=T)
+```
+
+
+
